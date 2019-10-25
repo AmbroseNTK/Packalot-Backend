@@ -1,0 +1,24 @@
+{
+  "name": "packalot",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.17.1",
+    "firebase-admin": "^8.6.1",
+    "mocha": "^6.2.1"
+  },
+  "apidoc": {
+    "title": "Packalot API Documentation",
+    "url": "https://api.github.com/v1",
+    "header": {
+      "title": "Packalot API Documentation"
+    }
+  }
+}
