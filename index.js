@@ -6,6 +6,10 @@ const ApiHelper = require('./helper')
 let apiHelper = new ApiHelper.create()
 const bodyParser = require('body-parser');
 const CORS = require('cors');
+const formidable = require('formidable');
+const busboy = require('connect-busboy');
+const path = require('path');
+const crypto = require("crypto");
 
 // Initialize firebase app admin
 var admin = require('firebase-admin');
@@ -31,6 +35,10 @@ app.use(CORS());
 app.options('*', CORS());
 
 app.use(bodyParser.json())
+
+app.use(busboy({
+    highWaterMark: 2 * 1024 * 1024
+}));
 
 /**
  * @api {get} / Ping server
@@ -345,6 +353,249 @@ app.post("/user/browse", async (req, res) => {
     else {
         res.send({ status: "failed", message: result.message });
     }
+});
+
+app.post("/upload", async (req, res) => {
+
+    req.pipe(req.busboy); // Pipe it trough busboy
+
+    let body = {};
+
+    req.busboy.on("field", (fieldname, val) => {
+        body[fieldname] = val;
+    }).on("file", async (fieldname, file, filename) => {
+
+        console.log(file);
+
+        // Check Authentication
+
+
+        let result = await apiHelper.validate(body, [
+            { link: "uid" },
+            {
+                link: "token", process: async (token) => {
+                    let isAuth = await checkAuth(body.uid, token);
+                    if (isAuth) {
+                        return {
+                            status: true
+                        }
+                    }
+                    return {
+                        status: false,
+                        failedMessage: "Permission denied"
+                    }
+                }
+            },
+            {
+                link: "location", process: async (location) => {
+                    let isExisted = await fs.existsSync("./warehouse/" + body.uid + location);
+                    if (isExisted) {
+                        return { status: true };
+                    }
+                    else {
+                        return {
+                            status: false,
+                            failedMessage: "Location not found"
+                        }
+                    }
+                }
+            }
+        ]);
+
+        if (result.status) {
+            console.log(`Upload of '${filename}' started`);
+            let fileId = crypto.randomBytes(20).toString('hex');
+
+            let fileSize = parseInt(req.headers['content-length']);
+            let docRef = await firestore.collection("users").doc(body.uid).get();
+            let user = docRef.data();
+            let remaining = user.packSize - (await getDirectorySize("./warehouse/" + body.uid));
+            if (fileSize < remaining) {
+                // Uploading
+
+                // Create a write stream of the new file
+                const fstream = fs.createWriteStream(path.join("./temp", fileId));
+                // Pipe it trough
+                file.pipe(fstream);
+
+                // On finish of the upload
+                fstream.on('close', async () => {
+                    console.log(`Upload of '${filename}' finished`);
+                    await fs.renameSync("./temp/" + fileId, "./warehouse/" + body.uid + body.location + filename);
+                    //await fs.rmdir(files['file'].path);
+                    res.send({ status: "success" });
+
+                });
+
+            }
+            else {
+                //await fs.rmdir("./temp/" + fileId);
+                res.send({ status: "failed", message: "No more space" });
+            }
+
+        }
+        else {
+            res.send({ status: "failed", message: result.message });
+        }
+    });
+
+
+});
+
+app.post("/upload-decapreted", async (req, res) => {
+    let form = new formidable.IncomingForm();
+    form.uploadDir = "./temp"
+    form.parse(req, async (err, fields, files) => {
+        if (files['file'] != undefined) {
+            let result = await apiHelper.validate(fields, [
+                { link: "uid" },
+                {
+                    link: "token", process: async (token) => {
+                        let isAuth = await checkAuth(fields.uid, token);
+                        if (isAuth) {
+                            return {
+                                status: true
+                            }
+                        }
+                        return {
+                            status: false,
+                            failedMessage: "Permission denied"
+                        }
+                    }
+                },
+                {
+                    link: "location", process: async (location) => {
+                        let isExisted = await fs.existsSync("./warehouse/" + fields.uid + location);
+                        if (isExisted) {
+                            return { status: true };
+                        }
+                        else {
+                            return {
+                                status: false,
+                                failedMessage: "Location not found"
+                            }
+                        }
+                    }
+                }
+            ]);
+            if (result.status) {
+                // Check remaining space
+                let docRef = await firestore.collection("users").doc(fields.uid).get();
+                let user = docRef.data();
+                let remaining = user.packSize - (await getDirectorySize("./warehouse/" + fields.uid));
+                if (files['file'].size < remaining) {
+                    console.log(files['file']);
+                    await fs.renameSync(files['file'].path, "./warehouse/" + fields.uid + fields.location + files['file'].name);
+                    // await fs.rmdir(files['file'].path);
+                    res.send({ status: "success" });
+                }
+                else {
+                    await fs.rmdir(files['file'].path);
+                    res.send({ status: "failed", message: "No more space" });
+                }
+            }
+            else {
+                await fs.rmdir(files['file'].path);
+                res.send({ status: "failed", message: result.message })
+            }
+        }
+    });
+    form.on('progress', function (bytesReceived, bytesExpected) {
+        console.log(bytesReceived + "/" + bytesExpected);
+    });
+    //res.send({ status: "success" });
+});
+
+app.post("/folder/create", async (req, res) => {
+    let result = await apiHelper.validate(req.body, [
+        { link: "uid" },
+        {
+            link: "token", process: async (token) => {
+                let isAuth = await checkAuth(req.body["uid"], token);
+                if (isAuth) {
+                    return {
+                        status: true
+                    }
+                }
+                return {
+                    status: false,
+                    failedMessage: "Permission denied"
+                }
+            }
+        },
+        {
+            link: "location", process: async (location) => {
+                let isExisted = await fs.existsSync("./warehouse/" + req.body["uid"] + location);
+                if (isExisted) {
+                    return { status: true };
+                }
+                else {
+                    return {
+                        status: false,
+                        failedMessage: "Location not found"
+                    }
+                }
+            }
+        },
+        {
+            link: "folderName"
+        }
+    ]);
+    if (result.status) {
+        try {
+            await fs.mkdirSync("./warehouse/" + req.body["uid"] + req.body["location"] + req.body["folderName"]);
+            res.send({ status: "success" });
+        }
+        catch{
+            res.send({ status: "failed", message: "Cannot create folder" });
+        }
+    }
+    else {
+        res.send({ status: "failed", message: result.message });
+    }
+});
+
+app.post("/file/delete", async (req, res) => {
+    let result = await apiHelper.validate(req.body, [
+        { link: "uid" },
+        {
+            link: "token", process: async (token) => {
+                let isAuth = await checkAuth(req.body["uid"], token);
+                if (isAuth) {
+                    return {
+                        status: true
+                    }
+                }
+                return {
+                    status: false,
+                    failedMessage: "Permission denied"
+                }
+            }
+        },
+        {
+            link: "location", process: async (location) => {
+                let isExisted = await fs.existsSync("./warehouse/" + req.body["uid"] + location);
+                if (isExisted) {
+                    return { status: true };
+                }
+                else {
+                    return {
+                        status: false,
+                        failedMessage: "Location not found"
+                    }
+                }
+            }
+        }
+    ]);
+
+    if (result.status) {
+        fs.rmdir("./warehouse/" + req.body["uid"] + location);
+        res.send({ status: "success" });
+    }
+    else {
+        res.send({ status: "failed", message: result.message });
+    }
+
 });
 
 app.listen(port, () => console.log(`Running on port ${port}!`))

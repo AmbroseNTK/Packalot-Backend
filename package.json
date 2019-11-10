@@ -9,9 +9,11 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "connect-busboy": "0.0.2",
     "cors": "^2.8.5",
     "express": "^4.17.1",
     "firebase-admin": "^8.6.1",
+    "formidable": "^1.2.1",
     "mocha": "^6.2.1"
   },
   "apidoc": {
