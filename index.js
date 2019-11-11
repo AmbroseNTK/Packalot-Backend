@@ -1,5 +1,5 @@
 const express = require('express')
-const fs = require('fs')
+const fs = require('fs-extra')
 const app = express()
 const port = 3000
 const ApiHelper = require('./helper')
@@ -430,7 +430,8 @@ app.post("/upload", async (req, res) => {
             }
             else {
                 //await fs.rmdir("./temp/" + fileId);
-                res.send({ status: "failed", message: "No more space" });
+                res.header('Connection', 'close');
+                res.send(413, { status: "failed", message: "No more space" });
             }
 
         }
@@ -589,13 +590,110 @@ app.post("/file/delete", async (req, res) => {
     ]);
 
     if (result.status) {
-        fs.rmdir("./warehouse/" + req.body["uid"] + location);
-        res.send({ status: "success" });
+        try {
+            if (req.body["forFolder"] == undefined) {
+                await fs.unlinkSync("./warehouse/" + req.body["uid"] + req.body["location"]);
+            }
+            else {
+                await fs.removeSync("./warehouse/" + req.body["uid"] + req.body["location"]);
+            }
+            res.send({ status: "success" });
+        }
+        catch (e) {
+            res.send({ status: "failed", message: e });
+        }
     }
     else {
         res.send({ status: "failed", message: result.message });
     }
 
+});
+
+app.post("/file/copy-or-move", async (req, res) => {
+    console.log("Copy");
+    let result = await apiHelper.validate(req.body, [
+        { link: "uid" },
+        {
+            link: "token", process: async (token) => {
+                let isAuth = await checkAuth(req.body["uid"], token);
+                if (isAuth) {
+                    return {
+                        status: true
+                    }
+                }
+                return {
+                    status: false,
+                    failedMessage: "Permission denied"
+                }
+            }
+        },
+        {
+            link: "method", process: (method) => {
+                if (method == "copy" || method == "move") {
+                    return { status: true };
+                }
+                return { status: false, failedMessage: "Method invaild" };
+            }
+        },
+        {
+            link: "source", process: async (source) => {
+                let isExisted = await fs.existsSync("./warehouse/" + req.body["uid"] + source);
+                if (isExisted) {
+                    return { status: true };
+                }
+                else {
+                    return {
+                        status: false,
+                        failedMessage: "Source not found"
+                    }
+                }
+            }
+        },
+        {
+            link: "destination", process: async (destination) => {
+                let isExisted = await fs.existsSync("./warehouse/" + req.body["uid"] + destination);
+                if (isExisted) {
+                    return { status: true };
+                }
+                else {
+                    return {
+                        status: false,
+                        failedMessage: "Destination not found"
+                    }
+                }
+            }
+        }
+    ]);
+
+    if (result.status) {
+        try {
+            let fileName = req.body["source"].split('/');
+            fileName = fileName[fileName.length - 1];
+            if (req.body["method"] == "copy") {
+                // Check remaining space
+                let docRef = await firestore.collection("users").doc(req.body["uid"]).get();
+                let user = docRef.data();
+                let remaining = user.packSize - (await getDirectorySize("./warehouse/" + req.body["uid"].uid));
+                if ((await getDirectorySize("./warehouse/" + req.body["uid"] + req.body["source"])) < remaining) {
+                    await fs.copySync("./warehouse/" + req.body["uid"] + req.body["source"], "./warehouse/" + req.body["uid"] + req.body["destination"] + fileName);
+                }
+                else {
+                    throw "No more space";
+                }
+            }
+            else {
+
+                await fs.moveSync("./warehouse/" + req.body["uid"] + req.body["source"], "./warehouse/" + req.body["uid"] + req.body["destination"] + fileName);
+            }
+            res.send({ status: "success" });
+        }
+        catch (e) {
+            res.send({ status: "failed", failedMessage: e });
+        }
+    }
+    else {
+        res.send({ status: "failed", failedMessage: result.message });
+    }
 });
 
 app.listen(port, () => console.log(`Running on port ${port}!`))
