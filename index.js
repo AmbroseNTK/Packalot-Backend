@@ -262,7 +262,13 @@ async function getDirectorySize(root) {
         return size;
     }
     catch{
-        return 0;
+        try {
+            size = (await fs.statSync(root)).size;
+            return size;
+        }
+        catch{
+            return 0;
+        }
     }
 }
 
@@ -673,7 +679,7 @@ app.post("/file/copy-or-move", async (req, res) => {
                 // Check remaining space
                 let docRef = await firestore.collection("users").doc(req.body["uid"]).get();
                 let user = docRef.data();
-                let remaining = user.packSize - (await getDirectorySize("./warehouse/" + req.body["uid"].uid));
+                let remaining = user.packSize - (await getDirectorySize("./warehouse/" + req.body["uid"]));
                 if ((await getDirectorySize("./warehouse/" + req.body["uid"] + req.body["source"])) < remaining) {
                     await fs.copySync("./warehouse/" + req.body["uid"] + req.body["source"], "./warehouse/" + req.body["uid"] + req.body["destination"] + fileName);
                 }
