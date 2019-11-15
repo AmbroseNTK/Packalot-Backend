@@ -14,7 +14,7 @@ const crypto = require("crypto");
 // Initialize firebase app admin
 var admin = require('firebase-admin');
 
-var serviceAccount = require("../packalot-firebase-adminsdk-xgz4c-8620359ad5.json");
+var serviceAccount = require("../packalot-firebase-adminsdk-jh5wz-e6835b2889.json");
 
 let firebaseApp = admin.initializeApp({
     credential: admin.credential.cert(serviceAccount),
@@ -701,5 +701,57 @@ app.post("/file/copy-or-move", async (req, res) => {
         res.send({ status: "failed", failedMessage: result.message });
     }
 });
+
+app.post("file/share", async (req, res) => {
+    let result = await apiHelper.validate(req.body, [
+        { link: "uid" },
+        {
+            link: "token", process: async (token) => {
+                let isAuth = await checkAuth(req.body["uid"], token);
+                if (isAuth) {
+                    return {
+                        status: true
+                    }
+                }
+                return {
+                    status: false,
+                    failedMessage: "Permission denied"
+                }
+            }
+        },
+        {
+            link: "fileName", process: async (fileName) => {
+                let isExisted = await fs.existsSync("./warehouse/" + req.body["uid"] + "/" + fileName);
+                if (isExisted) {
+                    return { status: true };
+                }
+                return { status: false, failedMessage: "File not found" }
+            }
+        },
+        {
+            link: "sharable", process: (shareable) => {
+                let r = (shareable == true || shareable == false);
+                if (r) {
+                    return { status: true };
+                }
+                return { status: false, failedMessage: "Sharable is invalid" };
+            }
+        },
+        {
+            link:"shortenLink"
+        }
+    ]);
+    if(result.status){
+        // Add file to share table
+        await firestore.collection("sharing").add({
+            fileName:req.body["fileName"],
+            enable:req.body["sharable"]
+        });
+    }
+    else{
+        res.send({status:"failed",failedMessage:result.message});
+    }
+});
+
 
 app.listen(port, () => console.log(`Running on port ${port}!`))
